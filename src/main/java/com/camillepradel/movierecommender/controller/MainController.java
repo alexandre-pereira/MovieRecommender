@@ -1,5 +1,6 @@
 package com.camillepradel.movierecommender.controller;
 
+import com.camillepradel.movierecommender.model.DataManager;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
@@ -14,114 +15,229 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import com.camillepradel.movierecommender.model.Genre;
 import com.camillepradel.movierecommender.model.Movie;
 import com.camillepradel.movierecommender.model.Rating;
+import com.mongodb.*;
+import java.util.ArrayList;
+import java.util.Date;
+import org.neo4j.driver.v1.Record;
+import org.neo4j.driver.v1.Session;
+import org.neo4j.driver.v1.StatementResult;
 
 @Controller
 public class MainController {
-	String message = "Welcome to Spring MVC!";
- 
-	@RequestMapping("/hello")
-	public ModelAndView showMessage(
-			@RequestParam(value = "name", required = false, defaultValue = "World") String name) {
-		System.out.println("in controller");
- 
-		ModelAndView mv = new ModelAndView("helloworld");
-		mv.addObject("message", message);
-		mv.addObject("name", name);
-		return mv;
-	}
 
-	@RequestMapping("/movies")
-	public ModelAndView showMovies(
-			@RequestParam(value = "user_id", required = false) Integer userId) {
-		System.out.println("show Movies of user " + userId);
+    @RequestMapping("/movies")
+    public ModelAndView showMovies(@RequestParam(value = "user_id", required = false) Integer userId) {
+        List<Movie> moviesList = new LinkedList<Movie>();
+        
+        if(DataManager.TYPE.equals("MONGODB")) {
+            MongoClient mongoClient = DataManager.getMongoClient();
+            DB db = mongoClient.getDB("MovieLens");
+            DBCollection ratings = db.getCollection("ratings");
+            DBCollection movies = db.getCollection("movies");
+            BasicDBObject query = new BasicDBObject();
+            DBObject doc;
 
-		// TODO: write query to retrieve all movies from DB or all movies rated by user with id userId,
-		// depending on whether or not a value was given for userId
-		List<Movie> movies = new LinkedList<Movie>();
-		Genre genre0 = new Genre(0, "genre0");
-		Genre genre1 = new Genre(1, "genre1");
-		Genre genre2 = new Genre(2, "genre2");
-		movies.add(new Movie(0, "Titre 0", Arrays.asList(new Genre[] {genre0, genre1})));
-		movies.add(new Movie(1, "Titre 1", Arrays.asList(new Genre[] {genre0, genre2})));
-		movies.add(new Movie(2, "Titre 2", Arrays.asList(new Genre[] {genre1})));
-		movies.add(new Movie(3, "Titre 3", Arrays.asList(new Genre[] {genre0, genre1, genre2})));
+            if(userId != null) {
+                query.put("user_id", userId);
+            }
+            DBCursor cursor = ratings.find(query);
+            Movie m;
 
-		ModelAndView mv = new ModelAndView("movies");
-		mv.addObject("userId", userId);
-		mv.addObject("movies", movies);
-		return mv;
-	}
+            while(cursor.hasNext()){
+                doc = cursor.next();
+                query.clear();
+                query.put("_id", doc.get("mov_id"));
+                doc = movies.findOne(query);
+                if(doc != null){
+                    m = new Movie((String) doc.get("title"));
+                    moviesList.add(m);
+                }
+            }
+            DataManager.closeMongoClient();
+        } else {
+            Session neoClient = DataManager.getNeoClient();
+            StatementResult result;
+            if(userId != null) {
+                result = neoClient.run( "MATCH (u:User {id:" + userId +"})-->(m:Movie) RETURN m.title;" );
+            } else {
+                result = neoClient.run( "MATCH (m:Movie) RETURN m.title;" );
+            }
+            Movie m;
+            Record record;
+            while (result.hasNext()) {
+                record = result.next();
+                m = new Movie((String) record.get("m.title").asString());
+                moviesList.add(m);
+            }
+            DataManager.closeNeoClient();
+        }
+        ModelAndView mv = new ModelAndView("movies");
+        mv.addObject("userId", userId);
+        mv.addObject("movies", moviesList);
+        return mv;
+    }
 
-	@RequestMapping(value = "/movieratings", method = RequestMethod.GET)
-	public ModelAndView showMoviesRattings(
-			@RequestParam(value = "user_id", required = true) Integer userId) {
-		System.out.println("GET /movieratings for user " + userId);
+    @RequestMapping(value = "/movieratings", method = RequestMethod.GET)
+    public ModelAndView showMoviesRattings(@RequestParam(value = "user_id", required = true) Integer userId) {
+        List<Movie> allMovies = new LinkedList<Movie>();
+        List<Rating> ratingsList = new LinkedList<Rating>();
+        if(DataManager.TYPE.equals("MONGODB")) {
+            MongoClient mongoClient = DataManager.getMongoClient();
+            DB db = mongoClient.getDB("MovieLens");
+            DBCollection ratings = db.getCollection("ratings");
+            DBCollection movies = db.getCollection("movies");
+            BasicDBObject query = new BasicDBObject();
+            DBObject docR;
+            DBObject docM;
+            DBCursor cursor;
 
-		// TODO: write query to retrieve all movies from DB
-		List<Movie> allMovies = new LinkedList<Movie>();
-		Genre genre0 = new Genre(0, "genre0");
-		Genre genre1 = new Genre(1, "genre1");
-		Genre genre2 = new Genre(2, "genre2");
-		allMovies.add(new Movie(0, "Titre 0", Arrays.asList(new Genre[] {genre0, genre1})));
-		allMovies.add(new Movie(1, "Titre 1", Arrays.asList(new Genre[] {genre0, genre2})));
-		allMovies.add(new Movie(2, "Titre 2", Arrays.asList(new Genre[] {genre1})));
-		allMovies.add(new Movie(3, "Titre 3", Arrays.asList(new Genre[] {genre0, genre1, genre2})));
+            query.put("user_id", userId);
+            cursor = ratings.find(query);
+            Movie m;
+            List<Genre> genreList = new ArrayList<Genre>();
 
-		// TODO: write query to retrieve all ratings from the specified user
-		List<Rating> ratings = new LinkedList<Rating>();
-		ratings.add(new Rating(new Movie(0, "Titre 0", Arrays.asList(new Genre[] {genre0, genre1})), userId, 3));
-		ratings.add(new Rating(new Movie(2, "Titre 2", Arrays.asList(new Genre[] {genre1})), userId, 4));
+            while(cursor.hasNext()){
+                docR = cursor.next();
+                query.clear();
+                query.put("_id", docR.get("mov_id"));
+                docM = movies.findOne(query);
+                if(docM != null){
+                    ratingsList.add(
+                        new Rating( 
+                            new Movie(
+                                (Integer)docM.get("_id"), 
+                                "Titre 0", 
+                                genreList
+                            ),
+                            userId,
+                            (Integer)docR.get("rating")
+                        )
+                    );
+                    allMovies.add(new Movie((String) docM.get("title")));
+                }
+            }
+            DataManager.closeMongoClient();
+        } else {
+            Session neoClient = DataManager.getNeoClient();
+            StatementResult result;
+            result = neoClient.run( "MATCH (u:User {id:" + userId +"})-[r:RATED]->(m:Movie) RETURN m.title, m.id, r.note;" );
+            
+            
+            Movie m;
+            Record record;
+            while (result.hasNext()) {
+                record = result.next();
+                m = new Movie(record.get("m.id").asInt(), (String) record.get("m.title").asString(), null);
+                
+                allMovies.add(m);
 
-		ModelAndView mv = new ModelAndView("movieratings");
-		mv.addObject("userId", userId);
-		mv.addObject("allMovies", allMovies);
-		mv.addObject("ratings", ratings);
+                if(record.get("r.note").asInt() > 0) {
+                    ratingsList.add(
+                    new Rating( 
+                        m,
+                        userId,
+                        record.get("r.note").asInt()
+                    )
+                );
+                }
+            }
+            DataManager.closeNeoClient();
+        }
+        ModelAndView mv = new ModelAndView("movieratings");
+        mv.addObject("userId", userId);
+        mv.addObject("allMovies", allMovies);
+        mv.addObject("ratings", ratingsList);
+        return mv;
+    }
 
-		return mv;
-	}
+    @RequestMapping(value = "/movieratings", method = RequestMethod.POST)
+    public String saveOrUpdateRating(@ModelAttribute("rating") Rating rating) {
+        if(DataManager.TYPE.equals("MONGODB")) {
+            MongoClient mongoClient = DataManager.getMongoClient();
+            DB db = mongoClient.getDB("MovieLens");
+            DBCollection ratings = db.getCollection("ratings");
+            BasicDBObject query = new BasicDBObject();
+            BasicDBObject results = (BasicDBObject) ratings.findOne(query);
 
-	@RequestMapping(value = "/movieratings", method = RequestMethod.POST)
-	public String saveOrUpdateRating(@ModelAttribute("rating") Rating rating) {
-		System.out.println("POST /movieratings for user " + rating.getUserId()
-											+ ", movie " + rating.getMovie().getId()
-											+ ", score " + rating.getScore());
+            if(results.isEmpty()){
+                query.put("user_id",rating.getUserId());
+                query.put("mov_id",rating.getMovieId());
+                query.put("rating",rating.getScore());
+                query.put("timestamp",new java.util.Date().getTime());
+                ratings.insert(query);
+            } else {
+                query.put("rating",rating.getScore());
+                ratings.update(results, query);
+            } 
+            DataManager.closeMongoClient();
+        } else {
+            Session neoClient = DataManager.getNeoClient();
+            int timestamp = (int) ((new Date()).getTime()/1000);
+            neoClient.run("MERGE (u:User{ id:"+rating.getUserId()+" })-[r:RATED]->(m:Movie{id:"+rating.getMovieId()+"}) ON CREATE SET r = { note: "+rating.getScore()+", timestamp: "+timestamp+"} ON MATCH  SET r += { note: "+rating.getScore()+", timestamp: "+timestamp+"}");
+            DataManager.closeNeoClient();
+        }
+        return "redirect:/movieratings?user_id=" + rating.getUserId();
+    }
+    
+    @RequestMapping(value = "/recommendations", method = RequestMethod.GET)
+    public ModelAndView ProcessRecommendations(@RequestParam(value = "user_id", required = true) Integer userId, @RequestParam(value = "processing_mode", required = false, defaultValue = "0") Integer processingMode){
+        List<Rating> recommendations = new LinkedList<Rating>();
 
-		// TODO: add query which
-		//         - add rating between specified user and movie if it doesn't exist
-		//         - update it if it does exist
+        if(DataManager.TYPE.equals("MONGODB")) {
+        Genre genre0 = new Genre(0, "genre0");
+        Genre genre1 = new Genre(1, "genre1");
+        Genre genre2 = new Genre(2, "genre2");
+        String titlePrefix;
+        if (processingMode.equals(0))
+                titlePrefix = "0_";
+        else if (processingMode.equals(1))
+                titlePrefix = "1_";
+        else if (processingMode.equals(2))
+                titlePrefix = "2_";
+        else
+                titlePrefix = "default_";
+        
+       } else {
+            Session neoClient = DataManager.getNeoClient();
+            /* Variante 1
+            StatementResult result = neoClient.run("MATCH (target_user:User {id : " +userId+ "})-[:RATED]->(m:Movie)<-[:RATED]-(other_user:User) " +
+            "WITH other_user, count(distinct m.title) AS num_common_movies, target_user " +
+            "ORDER BY num_common_movies DESC " +
+            "LIMIT 1 " +
+            "MATCH (other_user:User)-[rat_other_user:RATED]->(m2:Movie) " +
+            "WHERE NOT ((target_user:User)-[:RATED]->(m2:Movie)) " +
+            "RETURN m2.title AS rec_movie_title, rat_other_user.note AS rating, " +
+            "other_user.id AS watched_by " +
+            "ORDER BY rat_other_user.note DESC"); */
+            
+            /* Variante 2 */
+            StatementResult result = neoClient.run("MATCH (target_user:User {id : " +userId+ "})-[:RATED]->(m:Movie)<-[:RATED]-(other_user:User) " +
+            "WITH other_user, count(distinct m.title) AS num_common_movies, target_user " +
+            "ORDER BY num_common_movies DESC " +
+            "LIMIT 5 " +
+            "MATCH (other_user:User)-[rat_other_user:RATED]->(m2:Movie) " +
+            "WHERE NOT ((target_user:User)-[:RATED]->(m2:Movie)) " +
+            "RETURN m2.title AS rec_movie_title, rat_other_user.note AS rating, " +
+            "other_user.id AS watched_by " +
+            "ORDER BY rat_other_user.note DESC");
+  
+            Record record;
+            while (result.hasNext()) {
+                record = result.next();
+                recommendations.add(new Rating(new Movie(1, record.get("rec_movie_title").asString(), null), record.get("watched_by").asInt(), record.get("rating").asInt()));
+            }
+       }
+                
+        /*MATCH (me:User{ id: 4})-->(movie:Movie)<--(him:User)
+        WITH me, him, count(him.id) as commonRelations
+        RETURN me, him, commonRelations ORDER BY commonRelations DESC LIMIT 1;*/
 
-		return "redirect:/movieratings?user_id=" + rating.getUserId();
-	}
 
-	@RequestMapping(value = "/recommendations", method = RequestMethod.GET)
-	public ModelAndView ProcessRecommendations(
-			@RequestParam(value = "user_id", required = true) Integer userId,
-			@RequestParam(value = "processing_mode", required = false, defaultValue = "0") Integer processingMode){
-		System.out.println("GET /movieratings for user " + userId);
 
-		// TODO: process recommendations for specified user exploiting other users ratings
-		//       use different methods depending on processingMode parameter
-		Genre genre0 = new Genre(0, "genre0");
-		Genre genre1 = new Genre(1, "genre1");
-		Genre genre2 = new Genre(2, "genre2");
-		List<Rating> recommendations = new LinkedList<Rating>();
-		String titlePrefix;
-		if (processingMode.equals(0))
-			titlePrefix = "0_";
-		else if (processingMode.equals(1))
-			titlePrefix = "1_";
-		else if (processingMode.equals(2))
-			titlePrefix = "2_";
-		else
-			titlePrefix = "default_";
-		recommendations.add(new Rating(new Movie(0, titlePrefix + "Titre 0", Arrays.asList(new Genre[] {genre0, genre1})), userId, 5));
-		recommendations.add(new Rating(new Movie(1, titlePrefix + "Titre 1", Arrays.asList(new Genre[] {genre0, genre2})), userId, 5));
-		recommendations.add(new Rating(new Movie(2, titlePrefix + "Titre 2", Arrays.asList(new Genre[] {genre1})), userId, 4));
-		recommendations.add(new Rating(new Movie(3, titlePrefix + "Titre 3", Arrays.asList(new Genre[] {genre0, genre1, genre2})), userId, 3));
+        ModelAndView mv = new ModelAndView("recommendations");
+        mv.addObject("recommendations", recommendations);
 
-		ModelAndView mv = new ModelAndView("recommendations");
-		mv.addObject("recommendations", recommendations);
+        return mv;
+    }
 
-		return mv;
-	}
 }
