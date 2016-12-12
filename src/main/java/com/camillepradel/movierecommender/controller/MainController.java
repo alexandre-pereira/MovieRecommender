@@ -191,48 +191,65 @@ public class MainController {
             DBCollection users = db.getCollection("users");
             BasicDBObject query = new BasicDBObject();
             BasicDBObject projection = new BasicDBObject();
-            DBObject doc;
+            BasicDBObject doc;
             DBCursor cursor;
 
-            query.put("user_id", userId);
+            query.put("_id", userId);
             projection.put("movies.movieid",1);
-            cursor = users.find(query,projection);
+            projection.put("_id",0);
 
-            while(cursor.hasNext()){
-                doc = cursor.next();
-                
-                userMovieList.add((Integer)doc.get("movieid"));
-            }
+            doc = (BasicDBObject)users.findOne(query,projection);
             
-            // Unwind
+            System.out.println(doc);
+            
+            BasicDBList moviesList = (BasicDBList) doc.get("movies");
+            
             BasicDBObject unwind = new BasicDBObject("$unwind","$movies");
             // Project
             BasicDBObject projectParametersQuery = 
                     new BasicDBObject("_id", "$movies.movieid")
                             .append("userId","$_id");
  
-            BasicDBObject projectQuery = new BasicDBObject("$project", projectParametersQuery);
+            BasicDBObject project = new BasicDBObject("$project", projectParametersQuery);
 
             // Match
             BasicDBList userMovieIdList = new BasicDBList();
-            userMovieList.forEach( m -> userMovieIdList.add(new BasicDBObject("_id",m)));
-
-            DBObject orQuery = new BasicDBObject("$in", userMovieIdList);
-            orQuery.put("userId", new BasicDBObject("$ne",userId));
-            DBObject match = new BasicDBObject("$match",orQuery);
+//            userMovieList.forEach( m -> userMovieIdList.add(new BasicDBObject("_id",m)));
+            
+            moviesList.forEach(m -> userMovieList.add(((BasicDBObject)m).getInt("movieid")));
+//            moviesList.forEach(m -> System.out.println(m));
+            
+            DBObject matchparam = new BasicDBObject("userId",new BasicDBObject("$ne",userId))
+                    .append("_id",new BasicDBObject("$in", userMovieList));
+                    
+            
+            DBObject match = new BasicDBObject("$match",matchparam);
+            
+            System.out.println(match.toString());
+            
             // Group
             DBObject groupParameterQuery = new BasicDBObject("_id","$userId");
             groupParameterQuery.put("nbIteration", new BasicDBObject("$sum", 1));
             DBObject group = new BasicDBObject("$group", groupParameterQuery);
-            // Sort
+//            // Sort
             DBObject sort = new BasicDBObject("$sort", new BasicDBObject("nbIteration", -1));
-            // Limit
+//////            // Limit
             DBObject limit = new BasicDBObject("$limit",1);
-
-            Iterable<DBObject> result = users.aggregate(unwind,projectQuery,match, group, sort, limit).results();
+            List<DBObject> agrParam = new ArrayList<>();
             
-            System.out.println(result.toString());
+            agrParam.add(unwind);
+            agrParam.add(project);
+            agrParam.add(match);
+            agrParam.add(group);
+            agrParam.add(sort);
+            agrParam.add(limit);
             
+//            System.out.println(agrParam);
+            
+            Iterable<DBObject> result = users.aggregate(agrParam).results();
+            
+//            System.out.println(result.toString());
+           
        } else {
             Session neoClient = DataManager.getNeoClient();
             /* Variante 1
