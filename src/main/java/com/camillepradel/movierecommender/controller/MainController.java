@@ -1,7 +1,6 @@
 package com.camillepradel.movierecommender.controller;
 
 import com.camillepradel.movierecommender.model.DataManager;
-import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -181,22 +180,59 @@ public class MainController {
     
     @RequestMapping(value = "/recommendations", method = RequestMethod.GET)
     public ModelAndView ProcessRecommendations(@RequestParam(value = "user_id", required = true) Integer userId, @RequestParam(value = "processing_mode", required = false, defaultValue = "0") Integer processingMode){
-        List<Rating> recommendations = new LinkedList<Rating>();
-
-        if(DataManager.TYPE.equals("MONGODB")) {
-        Genre genre0 = new Genre(0, "genre0");
-        Genre genre1 = new Genre(1, "genre1");
-        Genre genre2 = new Genre(2, "genre2");
-        String titlePrefix;
-        if (processingMode.equals(0))
-                titlePrefix = "0_";
-        else if (processingMode.equals(1))
-                titlePrefix = "1_";
-        else if (processingMode.equals(2))
-                titlePrefix = "2_";
-        else
-                titlePrefix = "default_";
+        List<Rating> recommendations = new ArrayList<Rating>();
         
+        if(DataManager.TYPE.equals("MONGODB") && 
+                processingMode.equals(0)) {
+            //Les recommandations ont été implémenté qu'avec la première variante
+            List<Integer> userMovieList = new ArrayList<Integer>();
+            MongoClient mongoClient = DataManager.getMongoClient();
+            DB db = mongoClient.getDB("MovieLens");
+            DBCollection users = db.getCollection("users");
+            BasicDBObject query = new BasicDBObject();
+            BasicDBObject projection = new BasicDBObject();
+            DBObject doc;
+            DBCursor cursor;
+
+            query.put("user_id", userId);
+            projection.put("movies.movieid",1);
+            cursor = users.find(query,projection);
+
+            while(cursor.hasNext()){
+                doc = cursor.next();
+                
+                userMovieList.add((Integer)doc.get("movieid"));
+            }
+            
+            // Unwind
+            BasicDBObject unwind = new BasicDBObject("$unwind","$movies");
+            // Project
+            BasicDBObject projectParametersQuery = 
+                    new BasicDBObject("_id", "$movies.movieid")
+                            .append("userId","$_id");
+ 
+            BasicDBObject projectQuery = new BasicDBObject("$project", projectParametersQuery);
+
+            // Match
+            BasicDBList userMovieIdList = new BasicDBList();
+            userMovieList.forEach( m -> userMovieIdList.add(new BasicDBObject("_id",m)));
+
+            DBObject orQuery = new BasicDBObject("$in", userMovieIdList);
+            orQuery.put("userId", new BasicDBObject("$ne",userId));
+            DBObject match = new BasicDBObject("$match",orQuery);
+            // Group
+            DBObject groupParameterQuery = new BasicDBObject("_id","$userId");
+            groupParameterQuery.put("nbIteration", new BasicDBObject("$sum", 1));
+            DBObject group = new BasicDBObject("$group", groupParameterQuery);
+            // Sort
+            DBObject sort = new BasicDBObject("$sort", new BasicDBObject("nbIteration", -1));
+            // Limit
+            DBObject limit = new BasicDBObject("$limit",1);
+
+            Iterable<DBObject> result = users.aggregate(unwind,projectQuery,match, group, sort, limit).results();
+            
+            System.out.println(result.toString());
+            
        } else {
             Session neoClient = DataManager.getNeoClient();
             /* Variante 1

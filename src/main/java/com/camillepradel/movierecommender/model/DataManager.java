@@ -10,7 +10,7 @@ import org.neo4j.driver.v1.*;
 
 public class DataManager
 {
-    public static final String TYPE = "NEO4J";
+    public static final String TYPE = "MONGODB";
     private static MongoClient mongoClient;
     private static Session neoClient;
     private static Driver neoDriver;
