@@ -17,6 +17,7 @@ import com.camillepradel.movierecommender.model.Rating;
 import com.mongodb.*;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.Iterator;
 import org.neo4j.driver.v1.Record;
 import org.neo4j.driver.v1.Session;
 import org.neo4j.driver.v1.StatementResult;
@@ -186,12 +187,16 @@ public class MainController {
                 processingMode.equals(0)) {
             //Les recommandations ont été implémenté qu'avec la première variante
             List<Integer> userMovieList = new ArrayList<Integer>();
+            List<Integer> recoMovieList = new ArrayList<Integer>();
+            Integer idreco;
             MongoClient mongoClient = DataManager.getMongoClient();
             DB db = mongoClient.getDB("MovieLens");
             DBCollection users = db.getCollection("users");
+            DBCollection movies = db.getCollection("movies");
             BasicDBObject query = new BasicDBObject();
             BasicDBObject projection = new BasicDBObject();
             BasicDBObject doc;
+            BasicDBObject movie;
             DBCursor cursor;
 
             query.put("_id", userId);
@@ -246,7 +251,50 @@ public class MainController {
             
 //            System.out.println(agrParam);
             
+            //user qui a le plus de matching
             Iterable<DBObject> result = users.aggregate(agrParam).results();
+            
+            if( result.iterator().hasNext() ){
+                doc = (BasicDBObject)result.iterator().next();
+                
+                projection.clear();
+                projection.put("_id", 0);
+                projection.put("movies.movieid", 1);
+                
+                System.out.println(projection);
+                
+                System.out.println(users.find(new BasicDBObject("_id", doc.get("_id")), projection).iterator().next());
+                idreco = (Integer)doc.get("_id");
+                doc = (BasicDBObject)users.find(new BasicDBObject("_id", doc.get("_id")), projection).iterator().next();
+                
+                System.out.println(((BasicDBList)doc.get("movies")).size());
+                
+                for(Iterator<Object> ite = ((BasicDBList)doc.get("movies")).iterator();ite.hasNext();){
+                    movie = (BasicDBObject)ite.next();
+                    
+                    if(userMovieList.contains((Integer)movie.get("movieid"))){
+                        ite.remove();
+                    }else{
+                        recoMovieList.add((Integer)movie.get("movieid"));
+                    }
+                }
+                System.out.println(((BasicDBList)doc.get("movies")).size());
+                
+                //Recupération des titre des films
+                query = new BasicDBObject("_id", new BasicDBObject("$in", recoMovieList));
+                projection =  new BasicDBObject("title", 1);
+                
+                System.out.println(query);
+                
+                System.out.println(movies.find(query,projection).toArray());
+                cursor = movies.find(query,projection);
+                while(cursor.hasNext()){
+                    doc = (BasicDBObject)cursor.next();
+                    
+                    recommendations.add(new Rating(new Movie(doc.getString("title")), idreco));
+                }
+                
+            }
             
 //            System.out.println(result.toString());
            
